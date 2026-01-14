@@ -3,7 +3,7 @@ const Banner = require("../models/banner");
 // CREATE
 exports.create = async (req, res) => {
   try {
-    const { title, link } = req.body;
+    const { title, link,button } = req.body;
 
     let imgPath = "";
     if (req.file) {
@@ -13,6 +13,7 @@ exports.create = async (req, res) => {
     const banner = new Banner({
       title,
       link,
+      button,
       img: imgPath,
       file: req.file ? req.file.filename : null,
     });
