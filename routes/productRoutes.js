@@ -65,17 +65,7 @@ router.post(
   create
 );
 
-router.put(
-  "/product/update/:slug",
-  upload.fields([
-    { name: "mediaFiles", maxCount: 20 },
-    { name: "colorFiles", maxCount: 20 },
-    { name: "imageFile", maxCount: 20 },
-    { name: "pdf", maxCount: 20 },
-    { name: "video", maxCount: 20 },
-  ]),
-  update
-);
+router.put("/product/update/:slug", upload.any(), update);
 
 router.delete("/product/:slug", remove);
 

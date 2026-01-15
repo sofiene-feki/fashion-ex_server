@@ -95,9 +95,21 @@ exports.read = async (req, res) => {
 exports.update = async (req, res) => {
   try {
     const { body, files } = req;
-    console.log("👉 Update hit:", req.params.slug);
-    console.log("📦 Received files:", files);
-    console.log("📦 Received body (raw):", body);
+    // console.log("👉 Update hit:", req.params.slug);
+    // console.log("📦 Received files:", files);
+    // console.log("📦 Received body (raw):", body);
+    const colorFilesMap = {};
+
+    // Multer with upload.any() puts everything in req.files (array)
+    if (Array.isArray(files)) {
+      files.forEach((file) => {
+        const match = file.fieldname.match(/^colorFiles\[(\d+)\]$/);
+        if (match) {
+          const index = Number(match[1]);
+          colorFilesMap[index] = file;
+        }
+      });
+    }
 
     const existing = await Product.findOne({ slug: req.params.slug });
     if (!existing) return res.status(404).json({ error: "Product not found" });
@@ -110,10 +122,10 @@ exports.update = async (req, res) => {
       if (typeof value === "string") {
         try {
           const parsed = JSON.parse(value);
-          console.log(`✅ Parsed ${key}:`, parsed);
+          // console.log(`✅ Parsed ${key}:`, parsed);
           return parsed;
         } catch (err) {
-          console.warn(`⚠️ Failed to parse ${key}, got raw string:`, value);
+          // console.warn(`⚠️ Failed to parse ${key}, got raw string:`, value);
           return [];
         }
       }
@@ -140,15 +152,35 @@ exports.update = async (req, res) => {
     // -------------------------
     if (Array.isArray(body.colors)) {
       body.colors.forEach((color, i) => {
-        // If file uploaded for this color, update src
-        if (files?.colorFiles && files.colorFiles[i]) {
-          color.src = `/uploads/media/${files.colorFiles[i].filename}`;
-        } else if (color._id) {
-          // If color existed before and no new file uploaded, preserve its existing src
+        // new uploaded file for this index
+        if (Array.isArray(body.colors)) {
+          body.colors.forEach((color, i) => {
+            // ✅ new color image uploaded
+            if (colorFilesMap[i]) {
+              color.src = `/uploads/others/${colorFilesMap[i].filename}`;
+              color.alt = colorFilesMap[i].originalname;
+            }
+            // ✅ preserve old image
+            else if (color._id) {
+              const oldColor = existing.colors.find(
+                (c) => c._id.toString() === color._id
+              );
+              if (oldColor) {
+                color.src = oldColor.src;
+                color.alt = oldColor.alt;
+              }
+            }
+          });
+        }
+
+        // preserve old image if exists
+        else if (color._id) {
           const oldColor = existing.colors.find(
             (c) => c._id.toString() === color._id
           );
-          if (oldColor) color.src = oldColor.src;
+          if (oldColor) {
+            color.src = oldColor.src;
+          }
         }
       });
     }
