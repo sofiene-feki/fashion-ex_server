@@ -94,52 +94,56 @@ exports.read = async (req, res) => {
 // UPDATE PRODUCT
 exports.update = async (req, res) => {
   try {
-    const { body, files } = req;
-    // console.log("👉 Update hit:", req.params.slug);
-    // console.log("📦 Received files:", files);
-    // console.log("📦 Received body (raw):", body);
+    const { body } = req;
+    const files = Array.isArray(req.files) ? req.files : [];
+
+    // --------------------------------------------------
+    // 1️⃣ Normalize files from upload.any()
+    // --------------------------------------------------
+    const mediaFiles = [];
     const colorFilesMap = {};
 
-    // Multer with upload.any() puts everything in req.files (array)
-    if (Array.isArray(files)) {
-      files.forEach((file) => {
-        const match = file.fieldname.match(/^colorFiles\[(\d+)\]$/);
-        if (match) {
-          const index = Number(match[1]);
-          colorFilesMap[index] = file;
-        }
-      });
+    files.forEach((file) => {
+      // media gallery
+      if (file.fieldname === "mediaFiles") {
+        mediaFiles.push(file);
+      }
+
+      // color images: colorFiles[0], colorFiles[1]...
+      const match = file.fieldname.match(/^colorFiles\[(\d+)\]$/);
+      if (match) {
+        colorFilesMap[Number(match[1])] = file;
+      }
+    });
+
+    // --------------------------------------------------
+    // 2️⃣ Find existing product
+    // --------------------------------------------------
+    const existing = await Product.findOne({ slug: req.params.slug });
+    if (!existing) {
+      return res.status(404).json({ error: "Product not found" });
     }
 
-    const existing = await Product.findOne({ slug: req.params.slug });
-    if (!existing) return res.status(404).json({ error: "Product not found" });
-
-    // -------------------------
-    // Parse JSON fields safely
-    // -------------------------
-    const parseJSONSafely = (value, key) => {
-      if (!value) return [];
+    // --------------------------------------------------
+    // 3️⃣ Safe JSON parsing
+    // --------------------------------------------------
+    const parseJSON = (value, fallback = []) => {
+      if (!value) return fallback;
       if (typeof value === "string") {
         try {
-          const parsed = JSON.parse(value);
-          // console.log(`✅ Parsed ${key}:`, parsed);
-          return parsed;
-        } catch (err) {
-          // console.warn(`⚠️ Failed to parse ${key}, got raw string:`, value);
-          return [];
+          return JSON.parse(value);
+        } catch {
+          return fallback;
         }
       }
-      return value; // already object/array
+      return value;
     };
 
-    body.colors = parseJSONSafely(body.colors, "colors");
-    body.sizes = parseJSONSafely(body.sizes, "sizes");
-    body.existingMediaIds = parseJSONSafely(
-      body.existingMediaIds,
-      "existingMediaIds"
-    );
+    body.colors = parseJSON(body.colors);
+    body.sizes = parseJSON(body.sizes);
+    body.existingMediaIds = parseJSON(body.existingMediaIds);
 
-    // Convert size prices to numbers
+    // normalize size prices
     if (Array.isArray(body.sizes)) {
       body.sizes = body.sizes.map((s) => ({
         ...s,
@@ -147,89 +151,71 @@ exports.update = async (req, res) => {
       }));
     }
 
-    // -------------------------
-    // Handle colors update with files
-    // -------------------------
+    // --------------------------------------------------
+    // 4️⃣ Handle colors (preserve old images if not replaced)
+    // --------------------------------------------------
     if (Array.isArray(body.colors)) {
-      body.colors.forEach((color, i) => {
-        // new uploaded file for this index
-        if (Array.isArray(body.colors)) {
-          body.colors.forEach((color, i) => {
-            // ✅ new color image uploaded
-            if (colorFilesMap[i]) {
-              color.src = `/uploads/others/${colorFilesMap[i].filename}`;
-              color.alt = colorFilesMap[i].originalname;
-            }
-            // ✅ preserve old image
-            else if (color._id) {
-              const oldColor = existing.colors.find(
-                (c) => c._id.toString() === color._id
-              );
-              if (oldColor) {
-                color.src = oldColor.src;
-                color.alt = oldColor.alt;
-              }
-            }
-          });
+      body.colors.forEach((color, index) => {
+        // new uploaded color image
+        if (colorFilesMap[index]) {
+          color.src = `/uploads/others/${colorFilesMap[index].filename}`;
+          color.alt = colorFilesMap[index].originalname;
         }
-
-        // preserve old image if exists
+        // preserve existing image
         else if (color._id) {
           const oldColor = existing.colors.find(
             (c) => c._id.toString() === color._id
           );
           if (oldColor) {
             color.src = oldColor.src;
+            color.alt = oldColor.alt;
           }
         }
       });
     }
 
-    // -------------------------
-    // Handle media (images & videos)
-    // -------------------------
-    let updatedMedia = (existing.media || []).filter((m) =>
-      body.existingMediaIds.includes(m._id.toString())
+    // --------------------------------------------------
+    // 5️⃣ Handle media gallery
+    // --------------------------------------------------
+    const keptMedia = (existing.media || []).filter((m) =>
+      body.existingMediaIds?.includes(m._id.toString())
     );
 
-    const mediaToDelete = (existing.media || []).filter(
-      (m) => !body.existingMediaIds.includes(m._id.toString())
+    const removedMedia = (existing.media || []).filter(
+      (m) => !body.existingMediaIds?.includes(m._id.toString())
     );
 
-    // Delete removed media files from disk
-    for (let m of mediaToDelete) {
+    // delete removed files from disk
+    for (const m of removedMedia) {
       if (m.src) {
-        console.log("🗑️ Deleting media file:", m.src);
-        await deleteFile(m.src); // Implement deleteFile function
+        await deleteFile(m.src);
       }
     }
 
-    // Append newly uploaded media
-    if (files?.mediaFiles) {
-      const newMedia = files.mediaFiles.map((f) => ({
-        src: `/uploads/media/${f.filename}`,
-        type: f.mimetype.startsWith("image") ? "image" : "video",
-        alt: f.originalname,
-      }));
-      updatedMedia.push(...newMedia);
+    const newMedia = mediaFiles.map((f) => ({
+      src: `/uploads/media/${f.filename}`,
+      type: f.mimetype.startsWith("image") ? "image" : "video",
+      alt: f.originalname,
+    }));
+
+    body.media = [...keptMedia, ...newMedia];
+
+    // --------------------------------------------------
+    // 6️⃣ Update slug if title changed
+    // --------------------------------------------------
+    if (body.Title) {
+      body.slug = slugify(body.Title);
     }
 
-    body.media = updatedMedia;
-    console.log("✅ Final media array to save:", updatedMedia);
-
-    // If title changed, update slug
-    if (body.Title) body.slug = slugify(body.Title);
-
-    // -------------------------
-    // Update in DB
-    // -------------------------
+    // --------------------------------------------------
+    // 7️⃣ Update product
+    // --------------------------------------------------
     const updated = await Product.findOneAndUpdate(
       { slug: req.params.slug },
       body,
       { new: true, runValidators: true }
     );
 
-    console.log("✅ Product successfully updated:", updated);
     res.json(updated);
   } catch (err) {
     console.error("❌ Update failed:", err);
