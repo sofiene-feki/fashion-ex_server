@@ -237,15 +237,14 @@ exports.remove = async (req, res) => {
 // LIST PRODUCTS with filters/pagination
 exports.list = async (req, res) => {
   try {
-    console.log("📥 Request body:", req.body); // <-- log incoming payload
+    console.log("📥 Request body:", req.body);
 
     let { page = 0, itemsPerPage = 12, filters = {}, sort = "new" } = req.body;
 
-    // Parse safely
     page = parseInt(page);
     itemsPerPage = parseInt(itemsPerPage);
 
-    if (isNaN(page) || page < 0) page = 0; // allow 0-based
+    if (isNaN(page) || page < 0) page = 0;
     if (isNaN(itemsPerPage) || itemsPerPage < 1) itemsPerPage = 12;
 
     const skip = page * itemsPerPage;
@@ -269,26 +268,38 @@ exports.list = async (req, res) => {
 
     Object.keys(appliedFilters).forEach((key) => {
       const value = appliedFilters[key];
-      if (Array.isArray(value) && value.length) {
-        if (key === "priceRange" && value.length === 2) {
-          query.Price = { $gte: value[0], $lte: value[1] };
-        } else {
-          const fieldMap = {
-            category: "Category",
-            color: "colors.value",
-            brand: "Brand",
-            size: "size",
-          };
-          const dbField = fieldMap[key] || key;
-          query[dbField] = { $in: value };
-        }
+
+      if (!Array.isArray(value) || !value.length) return;
+
+      // PRICE RANGE
+      if (key === "priceRange" && value.length === 2) {
+        query.Price = { $gte: value[0], $lte: value[1] };
+        return;
       }
+
+      // CATEGORY (single string in DB, multiple from client)
+      if (key === "category") {
+        query.Category = {
+          $in: value.map((v) => new RegExp(`^${v.trim()}$`, "i")),
+        };
+        return;
+      }
+
+      // OTHER FILTERS
+      const fieldMap = {
+        color: "colors.name",
+        size: "sizes.name",
+      };
+
+      const dbField = fieldMap[key] || key;
+      query[dbField] = { $in: value };
     });
 
     const products = await Product.find(query)
       .sort(sortCriteria)
       .skip(skip)
       .limit(itemsPerPage);
+
     const total = await Product.countDocuments(query);
     const totalPages = Math.ceil(total / itemsPerPage);
 
@@ -467,5 +478,22 @@ exports.getProductOfTheYear = async (req, res) => {
     res.json(product);
   } catch (error) {
     res.status(500).json({ message: error.message });
+  }
+};
+
+exports.getProductFilters = async (req, res) => {
+  try {
+    // Get distinct colors
+    const colors = await Product.distinct("colors.name"); // if color is a string
+    // Or if it's an array of objects: Product.distinct("colors.name")
+
+    // Get distinct sizes
+    const sizes = await Product.distinct("sizes.name"); // if size is a string
+    // Or if sizes are inside an array: Product.distinct("sizes")
+
+    res.json({ colors, sizes });
+  } catch (error) {
+    console.error("Error fetching product filters:", error);
+    res.status(500).json({ message: "Server Error" });
   }
 };

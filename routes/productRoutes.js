@@ -15,6 +15,7 @@ const {
   getProductOfTheYear,
   getBestSellers,
   getProductsByCategory,
+  getProductFilters,
 } = require("../controllers/product");
 
 // multer setup
@@ -73,6 +74,8 @@ router.delete("/product/:slug", remove);
 router.get("/product/:slug", read);
 
 // LIST
+
+router.get("/products/filters", getProductFilters);
 
 console.log("✅ Product router loaded with routes:");
 router.stack.forEach((r) => {
