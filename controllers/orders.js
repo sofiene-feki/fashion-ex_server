@@ -131,38 +131,112 @@ exports.updateOrderStatus = async (req, res) => {
   }
 };
 
+// exports.sendToDelivery = async (req, res) => {
+//   try {
+//     const orders = req.body; // expecting array of { Client, Produit }
+
+//     if (!orders || !Array.isArray(orders) || orders.length === 0) {
+//       return res.status(400).json({ message: "No orders provided" });
+//     }
+
+//     const response = await axios.post(
+//       "https://www.firstdeliverygroup.com/api/v2/bulk-create",
+//       orders,
+//       {
+//         headers: {
+//           Authorization: `Bearer ${process.env.DELIVERY_TOKEN}`,
+//           "Content-Type": "application/json",
+//         },
+//       }
+//     );
+
+//     res.status(200).json({
+//       message: "Orders sent to delivery successfully",
+//       data: response.data,
+//     });
+//   } catch (error) {
+//     console.error(
+//       "❌ Error sending orders to delivery:",
+//       error.response?.data || error.message
+//     );
+
+//     res.status(500).json({
+//       message: "Failed to send orders to delivery",
+//       error: error.response?.data || error.message,
+//     });
+//   }
+// };
+
 exports.sendToDelivery = async (req, res) => {
   try {
-    const orders = req.body; // expecting array of { Client, Produit }
+    const orders = req.body;
 
-    if (!orders || !Array.isArray(orders) || orders.length === 0) {
+    if (!Array.isArray(orders) || orders.length === 0) {
       return res.status(400).json({ message: "No orders provided" });
     }
 
-    const response = await axios.post(
-      "https://www.firstdeliverygroup.com/api/v2/bulk-create",
-      orders,
-      {
-        headers: {
-          Authorization: `Bearer ${process.env.DELIVERY_TOKEN}`,
-          "Content-Type": "application/json",
-        },
+    const results = [];
+    const errors = [];
+
+    for (const order of orders) {
+      try {
+        const payload = {
+          action: "add",
+          code_api: process.env.DROPPEX_DEV_CODE,
+          cle_api: process.env.DROPPEX_DEV_KEY,
+
+          tel_l: order.Client.telephone,
+          tel2_l: order.Client.telephone2 || "",
+          nom_client: order.Client.nom,
+          gov_l: order.Client.gouvernerat,
+          adresse_l: order.Client.adresse,
+
+          libelle: order.Produit.designation,
+          cod: order.Produit.prix,
+          nb_piece: order.Produit.nombreArticle,
+          remarque: order.Produit.commentaire || "",
+
+          service: "Livraison",
+        };
+
+        const response = await axios.post(
+          process.env.DROPPEX_DEV_URL,
+          qs.stringify(payload),
+          {
+            headers: {
+              "Content-Type": "application/x-www-form-urlencoded",
+            },
+            timeout: 15000,
+          }
+        );
+
+        results.push({
+          success: true,
+          code_barre: response.data?.code_barre,
+          raw: response.data,
+        });
+      } catch (err) {
+        errors.push({
+          success: false,
+          order,
+          error: err.response?.data || err.message,
+        });
       }
-    );
+    }
 
     res.status(200).json({
-      message: "Orders sent to delivery successfully",
-      data: response.data,
+      message: "Droppex sync completed",
+      total: orders.length,
+      successCount: results.length,
+      failedCount: errors.length,
+      results,
+      errors,
     });
   } catch (error) {
-    console.error(
-      "❌ Error sending orders to delivery:",
-      error.response?.data || error.message
-    );
-
+    console.error("❌ Droppex bulk error:", error);
     res.status(500).json({
-      message: "Failed to send orders to delivery",
-      error: error.response?.data || error.message,
+      message: "Droppex delivery failed",
+      error: error.message,
     });
   }
 };

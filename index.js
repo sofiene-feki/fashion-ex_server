@@ -3,6 +3,7 @@ const mongoose = require("mongoose");
 const morgan = require("morgan");
 const cors = require("cors");
 const path = require("path");
+const robotsRoutes = require("./routes/robots");
 require("dotenv").config();
 
 const { readdirSync } = require("fs");
@@ -21,6 +22,7 @@ app.use(morgan("dev"));
 
 // static uploads
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
+app.use("/", robotsRoutes); // serves /robots.txt
 
 // database
 mongoose
@@ -29,16 +31,25 @@ mongoose
   .catch((err) => console.error(err));
 
 // load routes dynamically
-readdirSync("./routes").map((r) => {
-  const route = require(`./routes/${r}`);
-  if (route && typeof route === "function") {
-    app.use("/api", route);
-    console.log(`Route ${r} loaded successfully.`);
-  } else {
+readdirSync("./routes").forEach((r) => {
+  const routePath = path.join(__dirname, "routes", r);
+  const route = require(routePath);
+
+  if (!route || typeof route !== "function") {
     console.error(
-      `Failed to load route ${r}. Expected a function but got:`,
+      `❌ Failed to load route ${r}. Expected a function but got:`,
       route
     );
+    return;
+  }
+
+  // Mount sitemap at root, everything else under /api
+  if (r === "sitemap.js") {
+    app.use("/", route);
+    console.log(`✅ Route ${r} loaded at /`);
+  } else {
+    app.use("/api", route);
+    console.log(`✅ Route ${r} loaded at /api`);
   }
 });
 
