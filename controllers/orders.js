@@ -201,7 +201,7 @@ exports.sendToDelivery = async (req, res) => {
 
         const response = await axios.post(
           process.env.DROPPEX_DEV_URL,
-          qs.stringify(payload),
+          payload,
           {
             headers: {
               "Content-Type": "application/x-www-form-urlencoded",
