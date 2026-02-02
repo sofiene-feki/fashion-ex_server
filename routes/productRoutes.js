@@ -39,7 +39,7 @@ const upload = multer({ storage });
 // routes
 
 // 1️⃣ Category routes (static/dynamic)
-router.get("/products/category/:category", getProductsByCategory);
+router.post("/products/category/:category", getProductsByCategory);
 
 // 2️⃣ Listing routes
 router.post("/products", list);
@@ -63,7 +63,7 @@ router.post(
     { name: "pdf", maxCount: 20 },
     { name: "video", maxCount: 20 },
   ]),
-  create
+  create,
 );
 
 router.put("/product/update/:slug", upload.any(), update);

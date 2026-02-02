@@ -164,7 +164,7 @@ exports.update = async (req, res) => {
         // preserve existing image
         else if (color._id) {
           const oldColor = existing.colors.find(
-            (c) => c._id.toString() === color._id
+            (c) => c._id.toString() === color._id,
           );
           if (oldColor) {
             color.src = oldColor.src;
@@ -178,11 +178,11 @@ exports.update = async (req, res) => {
     // 5️⃣ Handle media gallery
     // --------------------------------------------------
     const keptMedia = (existing.media || []).filter((m) =>
-      body.existingMediaIds?.includes(m._id.toString())
+      body.existingMediaIds?.includes(m._id.toString()),
     );
 
     const removedMedia = (existing.media || []).filter(
-      (m) => !body.existingMediaIds?.includes(m._id.toString())
+      (m) => !body.existingMediaIds?.includes(m._id.toString()),
     );
 
     // delete removed files from disk
@@ -213,7 +213,7 @@ exports.update = async (req, res) => {
     const updated = await Product.findOneAndUpdate(
       { slug: req.params.slug },
       body,
-      { new: true, runValidators: true }
+      { new: true, runValidators: true },
     );
 
     res.json(updated);
@@ -320,22 +320,61 @@ exports.getProductsByCategory = async (req, res) => {
       return res.status(400).json({ message: "Category is required" });
     }
 
-    // Case-insensitive regex to match the DB Category field
-    const filter = {
+    let { page = 0, itemsPerPage = 12, sort = "new", filters = {} } = req.body;
+
+    page = parseInt(page);
+    itemsPerPage = parseInt(itemsPerPage);
+
+    if (isNaN(page) || page < 0) page = 0;
+    if (isNaN(itemsPerPage) || itemsPerPage < 1) itemsPerPage = 12;
+
+    const skip = page * itemsPerPage;
+
+    const sortCriteria = (() => {
+      switch (sort) {
+        case "best":
+          return { sold: -1 };
+        case "Price: Low to High":
+          return { Price: 1 };
+        case "Price: High to Low":
+          return { Price: -1 };
+        case "new":
+        default:
+          return { createdAt: -1 };
+      }
+    })();
+
+    const appliedFilters = filters.selected || filters;
+
+    const query = {
       Category: { $regex: `^${categoryParam}$`, $options: "i" },
     };
 
-    console.log("Filter used:", filter);
+    Object.keys(appliedFilters).forEach((key) => {
+      const value = appliedFilters[key];
 
-    // Fetch all matching products
-    const products = await Product.find(filter);
+      if (!Array.isArray(value) || !value.length) return;
 
-    console.log(`Products found for "${categoryParam}":`, products.length);
+      if (key === "priceRange" && value.length === 2) {
+        query.Price = { $gte: value[0], $lte: value[1] };
+        return;
+      }
 
-    res.json({
-      products,
-      total: products.length,
+      const fieldMap = { color: "colors.name", size: "sizes.name" };
+      const dbField = fieldMap[key] || key;
+
+      query[dbField] = { $in: value };
     });
+
+    const products = await Product.find(query)
+      .sort(sortCriteria)
+      .skip(skip)
+      .limit(itemsPerPage);
+
+    const total = await Product.countDocuments(query);
+    const totalPages = Math.ceil(total / itemsPerPage);
+
+    res.json({ products, total, totalPages, currentPage: page });
   } catch (err) {
     console.error("❌ Error fetching products by category:", err);
     res.status(500).json({ message: "Server error", error: err });
@@ -447,14 +486,14 @@ exports.setProductOfTheYear = async (req, res) => {
     // reset previous product of the year
     await Product.updateMany(
       { isProductOfTheYear: true },
-      { $set: { isProductOfTheYear: false } }
+      { $set: { isProductOfTheYear: false } },
     );
 
     // set the new one
     const product = await Product.findOneAndUpdate(
       { slug },
       { $set: { isProductOfTheYear: true } },
-      { new: true }
+      { new: true },
     );
 
     if (!product) return res.status(404).json({ message: "Product not found" });
